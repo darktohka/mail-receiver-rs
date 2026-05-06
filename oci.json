@@ -1,0 +1,44 @@
+{
+  "name": "darktohka/mail-receiver-rs",
+  "tags": ["latest"],
+  "config": {
+    "entrypoint": ["/mail-receiver-rs"],
+    "workingDir": "/",
+    "labels": {
+      "org.opencontainers.image.source": "https://github.com/darktohka/mail-receiver-rs"
+    }
+  },
+  "platforms": [
+    {
+      "architecture": "amd64",
+      "layers": [
+        {
+          "type": "dir",
+          "source": "./binary-x86_64",
+          "comment": "https://github.com/darktohka/mail-receiver-rs"
+        }
+      ]
+    },
+    {
+      "architecture": "arm64",
+      "layers": [
+        {
+          "type": "dir",
+          "source": "./binary-aarch64",
+          "comment": "https://github.com/darktohka/mail-receiver-rs"
+        }
+      ]
+    },
+    {
+      "architecture": "arm",
+      "variant": "v7",
+      "layers": [
+        {
+          "type": "dir",
+          "source": "./binary-armv7",
+          "comment": "https://github.com/darktohka/mail-receiver-rs"
+        }
+      ]
+    }
+  ]
+}

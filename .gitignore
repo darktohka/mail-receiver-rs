@@ -1,0 +1,11 @@
+mail
+realmail
+data
+
+build
+dist
+
+.env
+.vscode
+
+target
