@@ -26,7 +26,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
       - name: Build the binary
-        working-directory: bakend
+        working-directory: backend
         run: RUSTFLAGS="-C target-feature=+crt-static" ~/.cargo/bin/cross build --profile release-lto --target ${{ matrix.target }}
       - name: Upload artifact
         uses: actions/upload-artifact@v6
@@ -43,7 +43,8 @@ jobs:
         uses: actions/checkout@v6
       - name: Download artifacts
         uses: actions/download-artifact@v6
-        working-directory: backend
+        with:
+          path: backend
       - name: Set executable permissions
         working-directory: backend
         run: |
