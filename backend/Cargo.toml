@@ -14,7 +14,7 @@ mail-parser = { version = "0.11", features = ["serde"] }
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 anyhow = "1"
 uuid = { version = "1", features = ["v4"] }
 serde_urlencoded = "0.7"

@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, RawQuery, State};
 use axum::response::Redirect;
-use axum::routing::get;
+use axum::routing::{get, get_service};
 use axum::{Json, Router, http::StatusCode};
 use chrono::{Datelike, Utc};
 use serde::Deserialize;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing::info;
 
 use crate::config::Config;
@@ -356,9 +357,20 @@ fn percent_encode(s: &str) -> String {
     result
 }
 
+async fn api_catch_all() -> (StatusCode, Json<serde_json::Value>) {
+    (StatusCode::NOT_FOUND, Json(serde_json::json!({"message": "Not Found"})))
+}
+
 pub fn build_router(config: Arc<Config>) -> Router {
     let port = config.admin_app_port.unwrap_or(2255);
     info!("Admin API listening on port {port}");
+
+    let static_service = get_service(
+        ServeDir::new("dist").fallback(ServeFile::new("dist/index.html")),
+    )
+    .handle_error(|_| async {
+        (StatusCode::NOT_FOUND, Json(serde_json::json!({"message": "Not Found"})))
+    });
 
     Router::new()
         .route("/api/mail", get(redirect_current_week))
@@ -376,6 +388,8 @@ pub fn build_router(config: Arc<Config>) -> Router {
             "/api/message/{message_id}/attachment/{index}",
             get(get_attachment),
         )
+        .route("/api/*path", get(api_catch_all))
         .layer(CorsLayer::permissive())
         .with_state(config)
+        .fallback_service(static_service)
 }

@@ -34,21 +34,56 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: backend/target/${{ matrix.target }}/release-lto/mail-receiver-rs
 
-  push:
-    name: Push image
+  build-frontend:
+    name: Build frontend
     runs-on: ubuntu-latest
-    needs: build
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      - name: Download artifacts
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+  push:
+    name: Push image
+    runs-on: ubuntu-latest
+    needs: [build, build-frontend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Download binary artifacts
         uses: actions/download-artifact@v6
         with:
           path: backend
+      - name: Download frontend dist
+        uses: actions/download-artifact@v6
+        with:
+          name: frontend-dist
+          path: frontend-dist
       - name: Set executable permissions
         working-directory: backend
         run: |
           chmod +x */mail-receiver-rs
+      - name: Copy frontend dist into binary directories
+        working-directory: backend
+        run: |
+          for dir in binary-*/; do
+            cp -r "$GITHUB_WORKSPACE/frontend-dist" "${dir}dist"
+          done
       - name: Push the image
         working-directory: backend
         run: |
