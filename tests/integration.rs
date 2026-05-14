@@ -2,14 +2,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Datelike;
-use mail_receiver_rs::config::Config;
+use mail_receiver_rs::config::{Config, ScopedApiKey};
 use mail_receiver_rs::smtp;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 fn test_config(mail_dir: &std::path::Path) -> Arc<Config> {
     Arc::new(Config {
-        api_key: "test-api-key-123456789012345678".into(),
+        api_keys: vec![ScopedApiKey {
+            key: "test-api-key-123456789012345678".into(),
+            scope: "*".into(),
+        }],
         email_domains: vec!["test.example.com".into()],
         email_account_prefix: "test-".into(),
         admin_app_port: None,
@@ -466,7 +469,7 @@ async fn test_admin_api_list_week() {
     let client = reqwest::Client::new();
     let resp = client
         .get(format!(
-            "http://127.0.0.1:{admin_port}/api/mail/{year}/{week}"
+            "http://127.0.0.1:{admin_port}/api/week/{year}/{week}"
         ))
         .query(&[("api_key", "test-api-key-123456789012345678")])
         .send()
@@ -601,5 +604,270 @@ async fn test_smtp_large_body() {
     assert!(
         content.contains(&body),
         "raw file should contain the large body"
+    );
+}
+
+#[tokio::test]
+async fn test_admin_api_list_domain() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_config = Arc::clone(&config);
+    tokio::spawn(async move {
+        smtp::serve_smtp(smtp_listener, smtp_config).await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    send_test_email(
+        smtp_port,
+        "alice@other.com",
+        "test-user@test.example.com",
+        "Domain test",
+        "hello",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let (_admin_handle, admin_port) = start_admin_server(config).await;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/domain/test.example.com/test-user"
+        ))
+        .query(&[("api_key", "test-api-key-123456789012345678")])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_success(),
+        "expected 200, got {}",
+        resp.status()
+    );
+
+    let messages: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(!messages.is_empty(), "expected at least one message");
+    assert_eq!(messages[0]["subject"], "Domain test");
+    assert_eq!(messages[0]["from"], "alice@other.com");
+}
+
+#[tokio::test]
+async fn test_admin_api_get_message_by_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_config = Arc::clone(&config);
+    tokio::spawn(async move {
+        smtp::serve_smtp(smtp_listener, smtp_config).await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    send_test_email(
+        smtp_port,
+        "carol@other.com",
+        "test-user@test.example.com",
+        "ByID test",
+        "body",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // Get message_id from the weekly listing
+    let now = chrono::Utc::now();
+    let week = now.iso_week().week();
+    let year = now.year();
+    let (_admin_handle, admin_port) = start_admin_server(config).await;
+
+    let client = reqwest::Client::new();
+    let list_resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/week/{year}/{week}"
+        ))
+        .query(&[("api_key", "test-api-key-123456789012345678")])
+        .send()
+        .await
+        .unwrap();
+
+    let messages: Vec<serde_json::Value> = list_resp.json().await.unwrap();
+    let message_id = messages[0]["messageId"].as_str().unwrap().to_string();
+
+    // Now fetch by message_id
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/message/{message_id}"
+        ))
+        .query(&[("api_key", "test-api-key-123456789012345678")])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_success(),
+        "expected 200, got {}",
+        resp.status()
+    );
+
+    let msg: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(msg["subject"], "ByID test");
+}
+
+#[tokio::test]
+async fn test_admin_api_get_raw_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = test_config(dir.path());
+
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_config = Arc::clone(&config);
+    tokio::spawn(async move {
+        smtp::serve_smtp(smtp_listener, smtp_config).await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    send_test_email(
+        smtp_port,
+        "dave@other.com",
+        "test-user@test.example.com",
+        "Raw test",
+        "raw body content",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let now = chrono::Utc::now();
+    let week = now.iso_week().week();
+    let year = now.year();
+    let (_admin_handle, admin_port) = start_admin_server(config).await;
+
+    let client = reqwest::Client::new();
+    let list_resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/week/{year}/{week}"
+        ))
+        .query(&[("api_key", "test-api-key-123456789012345678")])
+        .send()
+        .await
+        .unwrap();
+
+    let messages: Vec<serde_json::Value> = list_resp.json().await.unwrap();
+    let message_id = messages[0]["messageId"].as_str().unwrap().to_string();
+
+    // Fetch raw by message_id
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/message/{message_id}/raw"
+        ))
+        .query(&[("api_key", "test-api-key-123456789012345678")])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_success(),
+        "expected 200, got {}",
+        resp.status()
+    );
+
+    let raw_text = resp.text().await.unwrap();
+    assert!(raw_text.contains("Subject: Raw test"));
+    assert!(raw_text.contains("raw body content"));
+}
+
+#[tokio::test]
+async fn test_admin_api_scoped_key_forbidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = Arc::new(Config {
+        api_keys: vec![
+            ScopedApiKey {
+                key: "admin-key".into(),
+                scope: "*".into(),
+            },
+            ScopedApiKey {
+                key: "limited-key".into(),
+                scope: "test.example.com".into(),
+            },
+        ],
+        email_domains: vec!["test.example.com".into()],
+        email_account_prefix: "test-".into(),
+        admin_app_port: None,
+        smtp_port: 0,
+        mail_dir: dir.path().to_path_buf(),
+    });
+
+    let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let smtp_port = smtp_listener.local_addr().unwrap().port();
+    let smtp_config = Arc::clone(&config);
+    tokio::spawn(async move {
+        smtp::serve_smtp(smtp_listener, smtp_config).await.unwrap();
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    send_test_email(
+        smtp_port,
+        "eve@other.com",
+        "test-user@test.example.com",
+        "Scoped test",
+        "hello",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let now = chrono::Utc::now();
+    let week = now.iso_week().week();
+    let year = now.year();
+    let (_admin_handle, admin_port) = start_admin_server(config).await;
+
+    let client = reqwest::Client::new();
+
+    // Scoped key should have access to its domain
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/domain/test.example.com/test-user"
+        ))
+        .query(&[("api_key", "limited-key")])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_success(),
+        "scoped key should access its domain, got {}",
+        resp.status()
+    );
+
+    let messages: Vec<serde_json::Value> = resp.json().await.unwrap();
+    assert!(!messages.is_empty());
+
+    // Scoped key should be forbidden from accessing a different domain
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/domain/other.com/test-user"
+        ))
+        .query(&[("api_key", "limited-key")])
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 403, "expected 403 for wrong domain");
+
+    // Wildcard key should access everything
+    let resp = client
+        .get(format!(
+            "http://127.0.0.1:{admin_port}/api/week/{year}/{week}"
+        ))
+        .query(&[("api_key", "admin-key")])
+        .send()
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status().is_success(),
+        "wildcard key should access all, got {}",
+        resp.status()
     );
 }

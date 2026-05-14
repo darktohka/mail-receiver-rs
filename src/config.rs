@@ -7,8 +7,14 @@ fn var(key: &str) -> Result<String> {
 }
 
 #[derive(Clone, Debug)]
+pub struct ScopedApiKey {
+    pub key: String,
+    pub scope: String,
+}
+
+#[derive(Clone, Debug)]
 pub struct Config {
-    pub api_key: String,
+    pub api_keys: Vec<ScopedApiKey>,
     pub email_domains: Vec<String>,
     pub email_account_prefix: String,
     pub admin_app_port: Option<u16>,
@@ -16,12 +22,43 @@ pub struct Config {
     pub mail_dir: PathBuf,
 }
 
+fn parse_api_keys(input: &str) -> Vec<ScopedApiKey> {
+    input
+        .split(',')
+        .filter_map(|s| {
+            let s = s.trim();
+            if s.is_empty() {
+                return None;
+            }
+            let colon = s.rfind(':')?;
+            let key = s[..colon].to_string();
+            let scope = s[colon + 1..].to_string();
+            if key.is_empty() || scope.is_empty() {
+                return None;
+            }
+            Some(ScopedApiKey { key, scope })
+        })
+        .collect()
+}
+
 impl Config {
     pub fn from_env() -> Result<Self> {
-        let api_key = var("API_KEY")?;
-        if api_key.len() < 20 {
-            anyhow::bail!("API_KEY must be at least 20 characters long");
-        }
+        let api_keys = if let Ok(keys_str) = std::env::var("API_KEYS") {
+            let keys = parse_api_keys(&keys_str);
+            if keys.is_empty() {
+                anyhow::bail!("API_KEYS is set but no valid keys found (format: key1:*,key2:domain.com)");
+            }
+            keys
+        } else {
+            let key = var("API_KEY")?;
+            if key.len() < 8 {
+                anyhow::bail!("API_KEY must be at least 8 characters long");
+            }
+            vec![ScopedApiKey {
+                key,
+                scope: "*".to_string(),
+            }]
+        };
 
         let email_domains: Vec<String> = var("EMAIL_DOMAIN")
             .unwrap_or_default()
@@ -38,7 +75,7 @@ impl Config {
             .unwrap_or(25);
 
         Ok(Config {
-            api_key,
+            api_keys,
             email_domains,
             email_account_prefix,
             admin_app_port,
