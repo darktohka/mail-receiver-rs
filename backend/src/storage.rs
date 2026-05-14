@@ -154,6 +154,23 @@ pub async fn load_message(
     }
 }
 
+pub async fn load_attachment_bytes(
+    mail_dir: &Path,
+    domain: &str,
+    username: &str,
+    filename: &str,
+    attachment_index: u32,
+) -> Option<Vec<u8>> {
+    use mail_parser::MessageParser;
+    let raw_filename = filename.replace(".json", ".raw");
+    let folder = sanitize(&format!("{username}@{domain}"));
+    let path = mail_dir.join(folder).join(raw_filename);
+    let raw_bytes = fs::read(&path).await.ok()?;
+    let msg = MessageParser::default().parse(&raw_bytes)?;
+    let part = msg.attachment(attachment_index)?;
+    Some(part.contents().to_vec())
+}
+
 pub async fn find_all_recipients(mail_dir: &Path) -> Vec<RecipientInfo> {
     let mut entries = match fs::read_dir(mail_dir).await {
         Ok(d) => d,

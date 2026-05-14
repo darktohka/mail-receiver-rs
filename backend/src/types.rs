@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use mail_parser::MimeHeaders;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,8 +30,19 @@ pub struct WeeklyIndex {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AttachmentInfo {
+    pub index: u32,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+    pub size: usize,
+    pub content_id: Option<String>,
+    pub inline: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ParsedMail {
-    pub attachments: Vec<Value>,
+    pub attachments: Vec<AttachmentInfo>,
     pub headers: Map<String, Value>,
     pub header_lines: Vec<HeaderLine>,
     pub html: Option<String>,
@@ -109,8 +121,27 @@ impl<'x> From<&mail_parser::Message<'x>> for ParsedMail {
         let in_reply_to = msg.header_raw("In-Reply-To").map(|s| s.to_string());
         let references = msg.header_raw("References").map(|s| s.to_string());
 
+        let attachments: Vec<AttachmentInfo> = msg
+            .attachments()
+            .enumerate()
+            .map(|(i, part)| {
+                let ct = part.content_type().map(|c| format!("{}/{}", c.ctype(), c.subtype().unwrap_or("octet-stream")));
+                let is_inline = part
+                    .content_disposition()
+                    .is_some_and(|d| d.ctype() != "attachment");
+                AttachmentInfo {
+                    index: i as u32,
+                    filename: part.attachment_name().map(|s| s.to_string()),
+                    content_type: ct,
+                    size: part.contents().len(),
+                    content_id: part.content_id().map(|s| s.to_string()),
+                    inline: is_inline,
+                }
+            })
+            .collect();
+
         ParsedMail {
-            attachments: Vec::new(),
+            attachments,
             headers,
             header_lines,
             html: html_body,

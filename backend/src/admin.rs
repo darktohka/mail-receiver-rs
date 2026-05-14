@@ -93,6 +93,12 @@ pub struct MessageIdPath {
     message_id: String,
 }
 
+#[derive(Deserialize)]
+pub struct AttachmentPath {
+    message_id: String,
+    index: u32,
+}
+
 type ApiError = (StatusCode, Json<serde_json::Value>);
 type ApiResult<T> = Result<T, ApiError>;
 
@@ -295,6 +301,46 @@ async fn list_weeks(
     Ok(Json(weeks))
 }
 
+async fn get_attachment(
+    State(config): State<Arc<Config>>,
+    Query(params): Query<ApiKeyParams>,
+    Path(AttachmentPath { message_id, index }): Path<AttachmentPath>,
+) -> Result<([(&'static str, &'static str); 2], Vec<u8>), ApiError> {
+    let scope = check_key(&params, &config)?;
+
+    match storage::find_transaction_by_id(&config.mail_dir, &message_id).await {
+        Some(summary) => {
+            let (username, domain) =
+                storage::parse_recipient_from_path(&summary.recipient_folder_path)
+                    .ok_or_else(not_found)?;
+
+            if !scope.matches_domain(&domain) {
+                return Err(forbidden());
+            }
+
+            match storage::load_attachment_bytes(
+                &config.mail_dir,
+                &domain,
+                &username,
+                &summary.filename,
+                index,
+            )
+            .await
+            {
+                Some(bytes) => Ok((
+                    [
+                        ("content-type", "application/octet-stream"),
+                        ("content-disposition", "attachment"),
+                    ],
+                    bytes,
+                )),
+                None => Err(not_found()),
+            }
+        }
+        None => Err(not_found()),
+    }
+}
+
 fn percent_encode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for byte in s.bytes() {
@@ -326,6 +372,10 @@ pub fn build_router(config: Arc<Config>) -> Router {
         )
         .route("/api/message/{message_id}", get(get_message_by_id))
         .route("/api/message/{message_id}/raw", get(get_raw_message))
+        .route(
+            "/api/message/{message_id}/attachment/{index}",
+            get(get_attachment),
+        )
         .layer(CorsLayer::permissive())
         .with_state(config)
 }
