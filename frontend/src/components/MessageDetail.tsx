@@ -157,8 +157,6 @@ export default function MessageDetail({ messageId }: Props) {
                       const isPreviewing = previewAtt?.index === att.index
                       return (
                         <div key={att.index} className="flex items-center gap-1 rounded-lg border p-1.5 text-sm">
-                          <span className="truncate font-medium px-1 max-w-40">{att.filename || `attachment-${att.index}`}</span>
-                          <span className="text-xs text-muted-foreground shrink-0 mr-1">{formatSize(att.size)}</span>
                           {isViewable && (
                             <Button
                               variant="ghost"
@@ -178,6 +176,8 @@ export default function MessageDetail({ messageId }: Props) {
                               <Download className="h-3.5 w-3.5" />
                             </Button>
                           </a>
+                          <span className="truncate font-medium px-1 max-w-40">{att.filename || `attachment-${att.index}`}</span>
+                          <span className="text-xs text-muted-foreground shrink-0 mr-1">{formatSize(att.size)}</span>
                         </div>
                       )
                     })}
