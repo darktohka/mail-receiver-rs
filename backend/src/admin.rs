@@ -388,7 +388,7 @@ pub fn build_router(config: Arc<Config>) -> Router {
             "/api/message/{message_id}/attachment/{index}",
             get(get_attachment),
         )
-        .route("/api/*path", get(api_catch_all))
+        .route("/api/{*path}", get(api_catch_all))
         .layer(CorsLayer::permissive())
         .with_state(config)
         .fallback_service(static_service)

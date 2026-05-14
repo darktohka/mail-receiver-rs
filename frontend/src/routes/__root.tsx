@@ -58,9 +58,9 @@ export default function RootLayout() {
       {!isLoginPage && (
         <header className="border-b sticky top-0 bg-background z-10">
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center gap-6">
-            <Link to="/recipients" className="font-bold text-lg tracking-tight">
+            <a href="https://github.com/darktohka/mail-receiver-rs" target="_blank" rel="noopener noreferrer" className="font-bold text-lg tracking-tight hover:underline">
               Mailbox
-            </Link>
+            </a>
             <nav className="flex items-center gap-1 flex-1">
               {tabs.map((tab) => (
                 <Link
