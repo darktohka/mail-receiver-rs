@@ -3,6 +3,15 @@ use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecipientInfo {
+    pub domain: String,
+    pub name: String,
+    pub email: String,
+    pub message_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactionSummary {
     pub recipient_folder_path: String,
     pub message_id: String,

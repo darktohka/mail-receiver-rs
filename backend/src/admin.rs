@@ -261,6 +261,40 @@ async fn get_raw_message(
     }
 }
 
+async fn list_recipients(
+    State(config): State<Arc<Config>>,
+    Query(params): Query<ApiKeyParams>,
+) -> ApiResult<Json<Vec<serde_json::Value>>> {
+    let scope = check_key(&params, &config)?;
+
+    let recipients = storage::find_all_recipients(&config.mail_dir).await;
+
+    let result: Vec<serde_json::Value> = recipients
+        .into_iter()
+        .filter(|r| scope.matches_domain(&r.domain))
+        .map(|r| {
+            serde_json::json!({
+                "domain": r.domain,
+                "name": r.name,
+                "email": r.email,
+                "messageCount": r.message_count,
+            })
+        })
+        .collect();
+
+    Ok(Json(result))
+}
+
+async fn list_weeks(
+    State(config): State<Arc<Config>>,
+    Query(params): Query<ApiKeyParams>,
+) -> ApiResult<Json<Vec<String>>> {
+    let _scope = check_key(&params, &config)?;
+
+    let weeks = storage::list_weekly_index_names(&config.mail_dir).await;
+    Ok(Json(weeks))
+}
+
 fn percent_encode(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     for byte in s.bytes() {
@@ -283,6 +317,8 @@ pub fn build_router(config: Arc<Config>) -> Router {
     Router::new()
         .route("/api/mail", get(redirect_current_week))
         .route("/api/week/{year}/{week}", get(list_week_mail))
+        .route("/api/recipients", get(list_recipients))
+        .route("/api/weeks", get(list_weeks))
         .route("/api/domain/{domain}/{name}", get(list_domain_mail))
         .route(
             "/api/domain/{domain}/{username}/{message_filename}",

@@ -4,7 +4,7 @@ use chrono::{Datelike, Utc};
 use tokio::fs;
 use tracing::info;
 
-use crate::types::{TransactionSummary, WeeklyIndex};
+use crate::types::{RecipientInfo, TransactionSummary, WeeklyIndex};
 
 fn sanitize(name: &str) -> String {
     name.replace(['/', '\0'], "-")
@@ -152,4 +152,56 @@ pub async fn load_message(
         Ok(data) => serde_json::from_str(&data).ok(),
         Err(_) => None,
     }
+}
+
+pub async fn find_all_recipients(mail_dir: &Path) -> Vec<RecipientInfo> {
+    let mut entries = match fs::read_dir(mail_dir).await {
+        Ok(d) => d,
+        Err(_) => return Vec::new(),
+    };
+    let mut recipients = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.contains('@') && entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+            let at_pos = name.find('@').unwrap();
+            let username = name[..at_pos].to_string();
+            let domain = name[at_pos + 1..].to_string();
+            let count = count_json_files(entry.path()).await;
+            recipients.push(RecipientInfo {
+                domain,
+                name: username,
+                email: name,
+                message_count: count as u32,
+            });
+        }
+    }
+    recipients.sort_by(|a, b| a.email.cmp(&b.email));
+    recipients
+}
+
+async fn count_json_files(dir: std::path::PathBuf) -> usize {
+    let mut entries = match fs::read_dir(&dir).await {
+        Ok(d) => d,
+        Err(_) => return 0,
+    };
+    let mut count = 0;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.extension().map_or(false, |e| e == "json") {
+            count += 1;
+        }
+    }
+    count
+}
+
+pub async fn list_weekly_index_names(mail_dir: &Path) -> Vec<String> {
+    let mut files = weekly_index_files(mail_dir).await;
+    files.sort();
+    let mut names = Vec::new();
+    for path in files {
+        if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
