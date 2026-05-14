@@ -116,3 +116,8 @@ export function getAttachmentUrl(id: string, index: number): string {
   const apiKey = getApiKey()
   return `${API_BASE}/message/${id}/attachment/${index}?api_key=${encodeURIComponent(apiKey ?? '')}`
 }
+
+export function getAttachmentViewUrl(id: string, index: number): string {
+  const apiKey = getApiKey()
+  return `${API_BASE}/message/${id}/attachment/${index}?view=1&api_key=${encodeURIComponent(apiKey ?? '')}`
+}

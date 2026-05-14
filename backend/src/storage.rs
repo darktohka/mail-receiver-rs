@@ -160,15 +160,19 @@ pub async fn load_attachment_bytes(
     username: &str,
     filename: &str,
     attachment_index: u32,
-) -> Option<Vec<u8>> {
-    use mail_parser::MessageParser;
+) -> Option<(Vec<u8>, String)> {
+    use mail_parser::{MimeHeaders, MessageParser};
     let raw_filename = filename.replace(".json", ".raw");
     let folder = sanitize(&format!("{username}@{domain}"));
     let path = mail_dir.join(folder).join(raw_filename);
     let raw_bytes = fs::read(&path).await.ok()?;
     let msg = MessageParser::default().parse(&raw_bytes)?;
     let part = msg.attachment(attachment_index)?;
-    Some(part.contents().to_vec())
+    let content_type = part
+        .content_type()
+        .map(|c| format!("{}/{}", c.ctype(), c.subtype().unwrap_or("octet-stream")))
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    Some((part.contents().to_vec(), content_type))
 }
 
 pub async fn find_all_recipients(mail_dir: &Path) -> Vec<RecipientInfo> {

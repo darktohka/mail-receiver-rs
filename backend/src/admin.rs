@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, RawQuery, State};
+use axum::http::{header, HeaderMap, HeaderValue};
 use axum::response::Redirect;
 use axum::routing::{get, get_service};
 use axum::{Json, Router, http::StatusCode};
@@ -302,12 +303,18 @@ async fn list_weeks(
     Ok(Json(weeks))
 }
 
+#[derive(Deserialize)]
+pub struct AttachmentQuery {
+    pub api_key: Option<String>,
+    pub view: Option<String>,
+}
+
 async fn get_attachment(
     State(config): State<Arc<Config>>,
-    Query(params): Query<ApiKeyParams>,
+    Query(params): Query<AttachmentQuery>,
     Path(AttachmentPath { message_id, index }): Path<AttachmentPath>,
-) -> Result<([(&'static str, &'static str); 2], Vec<u8>), ApiError> {
-    let scope = check_key(&params, &config)?;
+) -> Result<(HeaderMap, Vec<u8>), ApiError> {
+    let scope = check_key(&ApiKeyParams { api_key: params.api_key }, &config)?;
 
     match storage::find_transaction_by_id(&config.mail_dir, &message_id).await {
         Some(summary) => {
@@ -328,13 +335,16 @@ async fn get_attachment(
             )
             .await
             {
-                Some(bytes) => Ok((
-                    [
-                        ("content-type", "application/octet-stream"),
-                        ("content-disposition", "attachment"),
-                    ],
-                    bytes,
-                )),
+                Some((bytes, real_type)) => {
+                    let is_view = params.view.is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+                    let disposition = if is_view { "inline" } else { "attachment" };
+                    let content_type = if is_view { real_type } else { "application/octet-stream".to_string() };
+
+                    let mut headers = HeaderMap::new();
+                    headers.insert(header::CONTENT_TYPE, HeaderValue::from_str(&content_type).unwrap());
+                    headers.insert(header::CONTENT_DISPOSITION, HeaderValue::from_str(disposition).unwrap());
+                    Ok((headers, bytes))
+                }
                 None => Err(not_found()),
             }
         }

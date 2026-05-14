@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchMessage, getRawMessageUrl, getAttachmentUrl, clearApiKey } from '../lib/api'
+import { fetchMessage, getRawMessageUrl, getAttachmentViewUrl, getAttachmentUrl, clearApiKey } from '../lib/api'
+import { Button } from './ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Separator } from './ui/separator'
 import { ScrollArea } from './ui/scroll-area'
-import { Paperclip, Download } from 'lucide-react'
+import { Paperclip, Download, Eye, X } from 'lucide-react'
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return ''
@@ -33,11 +34,29 @@ export default function MessageDetail({ messageId }: Props) {
   const [raw, setRaw] = useState<string | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
 
+  const [previewAtt, setPreviewAtt] = useState<{ index: number; contentType: string | null; filename: string | null } | null>(null)
+  const [textPreview, setTextPreview] = useState<string | null>(null)
+  const [textPreviewLoading, setTextPreviewLoading] = useState(false)
+
   const { data: msg, isLoading, error } = useQuery({
     queryKey: ['message', messageId],
     queryFn: () => fetchMessage(messageId!),
     enabled: !!messageId,
   })
+
+  useEffect(() => {
+    if (!previewAtt || !messageId) return
+    const ct = previewAtt.contentType?.toLowerCase() ?? ''
+    if (!ct.startsWith('text/')) return
+
+    setTextPreviewLoading(true)
+    setTextPreview(null)
+    fetch(getAttachmentUrl(messageId, previewAtt.index))
+      .then(r => r.text())
+      .then(t => setTextPreview(t))
+      .catch(() => setTextPreview('Failed to load text content'))
+      .finally(() => setTextPreviewLoading(false))
+  }, [previewAtt, messageId])
 
   const loadRaw = async () => {
     if (!messageId || raw || rawLoading) return
@@ -132,19 +151,65 @@ export default function MessageDetail({ messageId }: Props) {
                     <span>{msg.attachments.length} attachment{msg.attachments.length > 1 ? 's' : ''}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {msg.attachments.map((att) => (
-                      <a
-                        key={att.index}
-                        href={getAttachmentUrl(messageId, att.index)}
-                        download={att.filename ?? `attachment-${att.index}`}
-                        className="flex items-center gap-2 rounded-lg border p-2.5 hover:bg-accent transition-colors text-sm min-w-0"
-                      >
-                        <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate font-medium">{att.filename || `attachment-${att.index}`}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">{formatSize(att.size)}</span>
-                      </a>
-                    ))}
+                    {msg.attachments.map((att) => {
+                      const ct = att.contentType?.toLowerCase() ?? ''
+                      const isViewable = ct.startsWith('image/') || ct === 'application/pdf' || ct.startsWith('text/')
+                      const isPreviewing = previewAtt?.index === att.index
+                      return (
+                        <div key={att.index} className="flex items-center gap-1 rounded-lg border p-1.5 text-sm">
+                          <span className="truncate font-medium px-1 max-w-40">{att.filename || `attachment-${att.index}`}</span>
+                          <span className="text-xs text-muted-foreground shrink-0 mr-1">{formatSize(att.size)}</span>
+                          {isViewable && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => setPreviewAtt(isPreviewing ? null : { index: att.index, contentType: att.contentType, filename: att.filename })}
+                              title="View"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                          <a
+                            href={getAttachmentUrl(messageId, att.index)}
+                            download={att.filename ?? `attachment-${att.index}`}
+                          >
+                            <Button variant="ghost" size="icon" className="h-7 w-7" title="Download">
+                              <Download className="h-3.5 w-3.5" />
+                            </Button>
+                          </a>
+                        </div>
+                      )
+                    })}
                   </div>
+                  {previewAtt && (
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="flex items-center justify-between bg-muted/50 px-3 py-1.5">
+                        <span className="text-sm font-medium truncate">{previewAtt.filename || `attachment-${previewAtt.index}`}</span>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setPreviewAtt(null)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="p-2">
+                        {(() => {
+                          const ct = previewAtt.contentType?.toLowerCase() ?? ''
+                          if (ct.startsWith('image/')) {
+                            return <img src={getAttachmentViewUrl(messageId, previewAtt.index)} alt="preview" className="max-w-full h-auto rounded" />
+                          }
+                          if (ct === 'application/pdf') {
+                            return <iframe src={getAttachmentViewUrl(messageId, previewAtt.index)} className="w-full h-[500px] rounded" title="PDF preview" />
+                          }
+                          if (ct.startsWith('text/')) {
+                            if (textPreviewLoading) {
+                              return <div className="text-center text-muted-foreground py-8 text-sm">Loading...</div>
+                            }
+                            return <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-muted p-4 rounded max-h-[500px] overflow-auto">{textPreview}</pre>
+                          }
+                          return null
+                        })()}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             )}
