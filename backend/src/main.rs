@@ -7,6 +7,7 @@ use tracing_subscriber::EnvFilter;
 
 use mail_receiver_rs::config::Config;
 use mail_receiver_rs::smtp::run_smtp_server;
+use mail_receiver_rs::storage;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,7 +16,19 @@ async fn main() -> Result<()> {
         .init();
 
     dotenvy::dotenv().ok();
-    let config = Arc::new(Config::from_env()?);
+
+    let args: Vec<String> = std::env::args().collect();
+    let is_rescan = args.get(1).map(|s| s.as_str()) == Some("rescan");
+
+    let config = Config::from_env().await?;
+    storage::init_db(&config.db).await?;
+
+    if is_rescan {
+        storage::rescan_database(&config.db, &config.mail_dir).await?;
+        return Ok(());
+    }
+
+    let config = Arc::new(config);
 
     info!("Starting mail-receiver-rs SMTP server");
 

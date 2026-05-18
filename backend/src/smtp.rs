@@ -144,14 +144,17 @@ where
     let raw_path = dir.join(format!("{label}.raw"));
     storage::write_file(&raw_path, &raw).await?;
 
-    let recipient_folder_path = format!("{}/", dir.display());
+    let (recipient_name, recipient_domain) = recipient
+        .split_once('@')
+        .unwrap_or((recipient, ""));
     let mut summary = TransactionSummary {
-        recipient_folder_path,
         message_id,
         processed_at,
         from: None,
         subject: None,
         filename: String::new(),
+        recipient_name: recipient_name.to_string(),
+        recipient_domain: recipient_domain.to_string(),
     };
 
     match MessageParser::default().parse(&raw) {
@@ -167,10 +170,8 @@ where
             let value = serde_json::to_value(&crate::types::ParsedMail::from(&parsed)).unwrap_or_default();
             storage::write_json(&json_path, &value).await?;
 
-            info!("Email parsed and saved. Updating weekly index...");
-            if let Err(e) = storage::update_or_create_weekly_index(&config.mail_dir, &summary).await {
-                error!("Failed to update weekly index: {e}");
-            }
+            info!("Email parsed and saved. Inserting into database...");
+            storage::insert_message(&config.db, &summary).await?;
         }
         None => {
             let err_path = dir.join(format!("{label}.err"));

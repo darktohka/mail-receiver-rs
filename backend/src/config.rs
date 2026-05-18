@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+use sqlx::SqlitePool;
 
 fn var(key: &str) -> Result<String> {
     std::env::var(key).with_context(|| format!("{key} must be set"))
@@ -20,6 +21,7 @@ pub struct Config {
     pub admin_app_port: Option<u16>,
     pub smtp_port: u16,
     pub mail_dir: PathBuf,
+    pub db: SqlitePool,
 }
 
 fn parse_api_keys(input: &str) -> Vec<ScopedApiKey> {
@@ -42,7 +44,7 @@ fn parse_api_keys(input: &str) -> Vec<ScopedApiKey> {
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self> {
+    pub async fn from_env() -> Result<Self> {
         let api_keys = if let Ok(keys_str) = std::env::var("API_KEYS") {
             let keys = parse_api_keys(&keys_str);
             if keys.is_empty() {
@@ -74,13 +76,18 @@ impl Config {
             .and_then(|p| p.parse().ok())
             .unwrap_or(25);
 
+        let mail_dir = PathBuf::from("mail");
+        let db_url = format!("sqlite:{}/mail.db", mail_dir.display());
+        let db = SqlitePool::connect(&db_url).await?;
+
         Ok(Config {
             api_keys,
             email_domains,
             email_account_prefix,
             admin_app_port,
             smtp_port,
-            mail_dir: PathBuf::from("mail"),
+            mail_dir,
+            db,
         })
     }
 

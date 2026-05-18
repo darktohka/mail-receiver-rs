@@ -127,38 +127,30 @@ async fn list_week_mail(
     Path(YearWeek { year, week }): Path<YearWeek>,
 ) -> ApiResult<Json<Vec<serde_json::Value>>> {
     let scope = check_key(&params, &config)?;
-    let index_name = format!("w{week}-{year}");
-    let index = storage::load_weekly_index_by_name(&config.mail_dir, &index_name).await;
+    let messages = storage::find_messages_by_week(&config.db, year as i32, week as i32).await;
 
-    let messages: Vec<serde_json::Value> = index
-        .messages
-        .iter()
-        .filter(|msg| {
-            storage::parse_recipient_from_path(&msg.recipient_folder_path)
-                .map_or(false, |(_, domain)| scope.matches_domain(&domain))
-        })
+    let result: Vec<serde_json::Value> = messages
+        .into_iter()
+        .filter(|msg| scope.matches_domain(&msg.recipient_domain))
         .map(|msg| {
-            let (username, domain) =
-                storage::parse_recipient_from_path(&msg.recipient_folder_path).unwrap_or_default();
-
             serde_json::json!({
                 "messageId": msg.message_id,
                 "processedAt": msg.processed_at,
                 "from": msg.from,
                 "subject": msg.subject,
                 "filename": msg.filename,
-                "recipient": format!("{username}@{domain}"),
+                "recipient": format!("{}@{}", msg.recipient_name, msg.recipient_domain),
                 "message": {
                 "href": format!("/api/domain/{}/{}",
-                    percent_encode(&domain),
-                    percent_encode(&username),
+                    percent_encode(&msg.recipient_domain),
+                    percent_encode(&msg.recipient_name),
                 )
                 }
             })
         })
         .collect();
 
-    Ok(Json(messages))
+    Ok(Json(result))
 }
 
 async fn list_domain_mail(
@@ -171,21 +163,18 @@ async fn list_domain_mail(
         return Err(forbidden());
     }
 
-    let messages = storage::find_transactions_by_recipient(&config.mail_dir, &name, &domain).await;
+    let messages = storage::find_transactions_by_recipient(&config.db, &name, &domain).await;
 
     let result: Vec<serde_json::Value> = messages
-        .iter()
+        .into_iter()
         .map(|msg| {
-            let (username, domain) =
-                storage::parse_recipient_from_path(&msg.recipient_folder_path).unwrap_or_default();
-
             serde_json::json!({
                 "messageId": msg.message_id,
                 "processedAt": msg.processed_at,
                 "from": msg.from,
                 "subject": msg.subject,
                 "filename": msg.filename,
-                "recipient": format!("{username}@{domain}"),
+                "recipient": format!("{}@{}", msg.recipient_name, msg.recipient_domain),
             })
         })
         .collect();
@@ -220,18 +209,19 @@ async fn get_message_by_id(
 ) -> ApiResult<Json<serde_json::Value>> {
     let scope = check_key(&params, &config)?;
 
-    match storage::find_transaction_by_id(&config.mail_dir, &message_id).await {
+    match storage::find_transaction_by_id(&config.db, &message_id).await {
         Some(summary) => {
-            let (username, domain) =
-                storage::parse_recipient_from_path(&summary.recipient_folder_path)
-                    .ok_or_else(not_found)?;
-
-            if !scope.matches_domain(&domain) {
+            if !scope.matches_domain(&summary.recipient_domain) {
                 return Err(forbidden());
             }
 
-            match storage::load_message(&config.mail_dir, &domain, &username, &summary.filename)
-                .await
+            match storage::load_message(
+                &config.mail_dir,
+                &summary.recipient_domain,
+                &summary.recipient_name,
+                &summary.filename,
+            )
+            .await
             {
                 Some(msg) => Ok(Json(msg)),
                 None => Err(not_found()),
@@ -248,18 +238,19 @@ async fn get_raw_message(
 ) -> Result<([(&'static str, &'static str); 1], Vec<u8>), ApiError> {
     let scope = check_key(&params, &config)?;
 
-    match storage::find_transaction_by_id(&config.mail_dir, &message_id).await {
+    match storage::find_transaction_by_id(&config.db, &message_id).await {
         Some(summary) => {
-            let (username, domain) =
-                storage::parse_recipient_from_path(&summary.recipient_folder_path)
-                    .ok_or_else(not_found)?;
-
-            if !scope.matches_domain(&domain) {
+            if !scope.matches_domain(&summary.recipient_domain) {
                 return Err(forbidden());
             }
 
-            match storage::load_raw_message(&config.mail_dir, &domain, &username, &summary.filename)
-                .await
+            match storage::load_raw_message(
+                &config.mail_dir,
+                &summary.recipient_domain,
+                &summary.recipient_name,
+                &summary.filename,
+            )
+            .await
             {
                 Some(data) => Ok(([("content-type", "message/rfc822")], data)),
                 None => Err(not_found()),
@@ -275,7 +266,7 @@ async fn list_recipients(
 ) -> ApiResult<Json<Vec<serde_json::Value>>> {
     let scope = check_key(&params, &config)?;
 
-    let recipients = storage::find_all_recipients(&config.mail_dir).await;
+    let recipients = storage::find_all_recipients(&config.db).await;
 
     let result: Vec<serde_json::Value> = recipients
         .into_iter()
@@ -299,7 +290,7 @@ async fn list_weeks(
 ) -> ApiResult<Json<Vec<String>>> {
     let _scope = check_key(&params, &config)?;
 
-    let weeks = storage::list_weekly_index_names(&config.mail_dir).await;
+    let weeks = storage::list_weeks(&config.db).await;
     Ok(Json(weeks))
 }
 
@@ -316,20 +307,16 @@ async fn get_attachment(
 ) -> Result<(HeaderMap, Vec<u8>), ApiError> {
     let scope = check_key(&ApiKeyParams { api_key: params.api_key }, &config)?;
 
-    match storage::find_transaction_by_id(&config.mail_dir, &message_id).await {
+    match storage::find_transaction_by_id(&config.db, &message_id).await {
         Some(summary) => {
-            let (username, domain) =
-                storage::parse_recipient_from_path(&summary.recipient_folder_path)
-                    .ok_or_else(not_found)?;
-
-            if !scope.matches_domain(&domain) {
+            if !scope.matches_domain(&summary.recipient_domain) {
                 return Err(forbidden());
             }
 
             match storage::load_attachment_bytes(
                 &config.mail_dir,
-                &domain,
-                &username,
+                &summary.recipient_domain,
+                &summary.recipient_name,
                 &summary.filename,
                 index,
             )

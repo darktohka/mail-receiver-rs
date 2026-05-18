@@ -14,21 +14,16 @@ pub struct RecipientInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSummary {
-    pub recipient_folder_path: String,
     pub message_id: String,
     pub processed_at: String,
     pub from: Option<String>,
     pub subject: Option<String>,
     pub filename: String,
+    pub recipient_name: String,
+    pub recipient_domain: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WeeklyIndex {
-    pub name: String,
-    pub messages: Vec<TransactionSummary>,
-}
-
-#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentInfo {
     pub index: u32,
@@ -39,7 +34,7 @@ pub struct AttachmentInfo {
     pub inline: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedMail {
     pub attachments: Vec<AttachmentInfo>,
@@ -60,20 +55,20 @@ pub struct ParsedMail {
     pub references: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HeaderLine {
     pub key: String,
     pub line: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddressObject {
     pub value: Vec<Address>,
     pub text: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Address {
     pub address: String,
     pub name: String,

@@ -4,10 +4,14 @@ use std::time::Duration;
 use chrono::Datelike;
 use mail_receiver_rs::config::{Config, ScopedApiKey};
 use mail_receiver_rs::smtp;
+use mail_receiver_rs::storage;
+use sqlx::SqlitePool;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-fn test_config(mail_dir: &std::path::Path) -> Arc<Config> {
+async fn test_config(mail_dir: &std::path::Path) -> Arc<Config> {
+    let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    storage::init_db(&db).await.unwrap();
     Arc::new(Config {
         api_keys: vec![ScopedApiKey {
             key: "test-api-key-123456789012345678".into(),
@@ -18,6 +22,7 @@ fn test_config(mail_dir: &std::path::Path) -> Arc<Config> {
         admin_app_port: None,
         smtp_port: 0,
         mail_dir: mail_dir.to_path_buf(),
+        db,
     })
 }
 
@@ -116,7 +121,7 @@ async fn send_test_email(
 #[tokio::test]
 async fn test_smtp_accepts_valid_recipient() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let resp = send_test_email(
@@ -157,7 +162,7 @@ async fn test_smtp_accepts_valid_recipient() {
 #[tokio::test]
 async fn test_smtp_rejects_invalid_recipient() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let resp = send_test_email(
@@ -182,7 +187,7 @@ async fn test_smtp_rejects_invalid_recipient() {
 #[tokio::test]
 async fn test_smtp_rejects_wrong_domain() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let resp = send_test_email(
@@ -201,7 +206,7 @@ async fn test_smtp_rejects_wrong_domain() {
 #[tokio::test]
 async fn test_smtp_wrong_prefix() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let resp = send_test_email(
@@ -220,7 +225,7 @@ async fn test_smtp_wrong_prefix() {
 #[tokio::test]
 async fn test_smtp_rejects_data_without_recipient() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
@@ -251,7 +256,7 @@ async fn test_smtp_rejects_data_without_recipient() {
 #[tokio::test]
 async fn test_smtp_rset_resets_transaction() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
@@ -289,7 +294,7 @@ async fn test_smtp_rset_resets_transaction() {
 #[tokio::test]
 async fn test_smtp_unknown_command() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
@@ -313,7 +318,7 @@ async fn test_smtp_unknown_command() {
 #[tokio::test]
 async fn test_smtp_noop() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let stream = TcpStream::connect(format!("127.0.0.1:{port}"))
@@ -334,7 +339,7 @@ async fn test_smtp_noop() {
 #[tokio::test]
 async fn test_smtp_stores_raw_and_parsed() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     send_test_email(
@@ -383,7 +388,7 @@ async fn test_smtp_stores_raw_and_parsed() {
 #[tokio::test]
 async fn test_admin_api_redirect() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_admin_handle, admin_port) = start_admin_server(config).await;
 
     let client = reqwest::Client::builder()
@@ -408,7 +413,7 @@ async fn test_admin_api_redirect() {
 #[tokio::test]
 async fn test_admin_api_unauthorized() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_admin_handle, admin_port) = start_admin_server(config).await;
 
     let client = reqwest::Client::new();
@@ -437,7 +442,7 @@ async fn test_admin_api_unauthorized() {
 #[tokio::test]
 async fn test_admin_api_list_week() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
 
     // Start SMTP
     let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -491,8 +496,8 @@ async fn test_admin_api_list_week() {
 #[tokio::test]
 async fn test_weekly_index_created() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
-    let (_handle, port) = start_smtp_server(config).await;
+    let config = test_config(dir.path()).await;
+    let (_handle, port) = start_smtp_server(Arc::clone(&config)).await;
 
     send_test_email(
         port,
@@ -504,31 +509,18 @@ async fn test_weekly_index_created() {
     .await;
     tokio::time::sleep(Duration::from_millis(200)).await;
 
-    let now = chrono::Utc::now();
-    let week = now.iso_week().week();
-    let year = now.year();
-    let index_name = format!("w{week}-{year}");
-    let index_path = dir.path().join(format!("{index_name}.json"));
+    let messages = storage::find_transactions_by_recipient(&config.db, "test-user", "test.example.com").await;
+    assert!(!messages.is_empty(), "should have at least one message in db");
+    assert_eq!(messages[0].subject.as_deref(), Some("Index test"));
 
-    assert!(
-        index_path.exists(),
-        "weekly index should exist at {index_path:?}"
-    );
-
-    let content = std::fs::read_to_string(&index_path).unwrap();
-    let index: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert!(index["messages"].is_array());
-    assert!(
-        !index["messages"].as_array().unwrap().is_empty(),
-        "weekly index should have at least one message"
-    );
-    assert_eq!(index["messages"][0]["subject"], "Index test");
+    let weeks = storage::list_weeks(&config.db).await;
+    assert!(!weeks.is_empty(), "should have at least one week");
 }
 
 #[tokio::test]
 async fn test_smtp_concurrent_messages() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let mut handles = Vec::new();
@@ -572,7 +564,7 @@ async fn test_smtp_concurrent_messages() {
 #[tokio::test]
 async fn test_smtp_large_body() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
     let (_handle, port) = start_smtp_server(config).await;
 
     let body = "A".repeat(100_000);
@@ -610,7 +602,7 @@ async fn test_smtp_large_body() {
 #[tokio::test]
 async fn test_admin_api_list_domain() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
 
     let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let smtp_port = smtp_listener.local_addr().unwrap().port();
@@ -657,7 +649,7 @@ async fn test_admin_api_list_domain() {
 #[tokio::test]
 async fn test_admin_api_get_message_by_id() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
 
     let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let smtp_port = smtp_listener.local_addr().unwrap().port();
@@ -719,7 +711,7 @@ async fn test_admin_api_get_message_by_id() {
 #[tokio::test]
 async fn test_admin_api_get_raw_message() {
     let dir = tempfile::tempdir().unwrap();
-    let config = test_config(dir.path());
+    let config = test_config(dir.path()).await;
 
     let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let smtp_port = smtp_listener.local_addr().unwrap().port();
@@ -781,6 +773,8 @@ async fn test_admin_api_get_raw_message() {
 #[tokio::test]
 async fn test_admin_api_scoped_key_forbidden() {
     let dir = tempfile::tempdir().unwrap();
+    let db = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    storage::init_db(&db).await.unwrap();
     let config = Arc::new(Config {
         api_keys: vec![
             ScopedApiKey {
@@ -797,6 +791,7 @@ async fn test_admin_api_scoped_key_forbidden() {
         admin_app_port: None,
         smtp_port: 0,
         mail_dir: dir.path().to_path_buf(),
+        db,
     });
 
     let smtp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
